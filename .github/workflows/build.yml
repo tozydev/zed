@@ -1,0 +1,32 @@
+name: Build Zed
+on:
+  workflow_call:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: Swatinem/rust-cache@v2.7.3
+      - run: rustup update
+      - run: rustup target add wasm32-wasip1
+      - run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zed
+          path: target/release/zed.exe
