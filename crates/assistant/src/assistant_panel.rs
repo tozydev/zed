@@ -18,7 +18,7 @@ use crate::{
     PendingSlashCommand, PendingSlashCommandStatus, QuoteSelection, RemoteContextMetadata,
     SavedContextMetadata, Split, ToggleFocus, ToggleModelSelector, WorkflowStepResolution,
 };
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use assistant_slash_command::{SlashCommand, SlashCommandOutputSection};
 use assistant_tool::ToolRegistry;
 use client::{proto, Client, Status};
@@ -77,7 +77,7 @@ use ui::TintColor;
 use ui::{
     prelude::*,
     utils::{format_distance_from_now, DateTimeType},
-    Avatar, AvatarShape, ButtonLike, ContextMenu, Disclosure, ElevationIndex, KeyBinding, ListItem,
+    Avatar, ButtonLike, ContextMenu, Disclosure, ElevationIndex, KeyBinding, ListItem,
     ListItemSpacing, PopoverMenu, PopoverMenuHandle, Tooltip,
 };
 use util::{maybe, ResultExt};
@@ -262,9 +262,7 @@ impl PickerDelegate for SavedContextPickerDelegate {
                             .gap_2()
                             .children(if let Some(host_user) = host_user {
                                 vec![
-                                    Avatar::new(host_user.avatar_uri.clone())
-                                        .shape(AvatarShape::Circle)
-                                        .into_any_element(),
+                                    Avatar::new(host_user.avatar_uri.clone()).into_any_element(),
                                     Label::new(format!("Shared by @{}", host_user.github_login))
                                         .color(Color::Muted)
                                         .size(LabelSize::Small)
@@ -699,7 +697,9 @@ impl AssistantPanel {
             log::error!("no context found with ID: {}", context_id.to_proto());
             return;
         };
-        let lsp_adapter_delegate = make_lsp_adapter_delegate(&self.project, cx).log_err();
+        let lsp_adapter_delegate = make_lsp_adapter_delegate(&self.project, cx)
+            .log_err()
+            .flatten();
 
         let assistant_panel = cx.view().downgrade();
         let editor = cx.new_view(|cx| {
@@ -973,7 +973,8 @@ impl AssistantPanel {
                 this.update(&mut cx, |this, cx| {
                     let workspace = this.workspace.clone();
                     let project = this.project.clone();
-                    let lsp_adapter_delegate = make_lsp_adapter_delegate(&project, cx).log_err();
+                    let lsp_adapter_delegate =
+                        make_lsp_adapter_delegate(&project, cx).log_err().flatten();
 
                     let fs = this.fs.clone();
                     let project = this.project.clone();
@@ -1003,7 +1004,9 @@ impl AssistantPanel {
             None
         } else {
             let context = self.context_store.update(cx, |store, cx| store.create(cx));
-            let lsp_adapter_delegate = make_lsp_adapter_delegate(&self.project, cx).log_err();
+            let lsp_adapter_delegate = make_lsp_adapter_delegate(&self.project, cx)
+                .log_err()
+                .flatten();
 
             let assistant_panel = cx.view().downgrade();
             let editor = cx.new_view(|cx| {
@@ -1209,7 +1212,7 @@ impl AssistantPanel {
         let project = self.project.clone();
         let workspace = self.workspace.clone();
 
-        let lsp_adapter_delegate = make_lsp_adapter_delegate(&project, cx).log_err();
+        let lsp_adapter_delegate = make_lsp_adapter_delegate(&project, cx).log_err().flatten();
 
         cx.spawn(|this, mut cx| async move {
             let context = context.await?;
@@ -1256,7 +1259,9 @@ impl AssistantPanel {
             .update(cx, |store, cx| store.open_remote_context(id, cx));
         let fs = self.fs.clone();
         let workspace = self.workspace.clone();
-        let lsp_adapter_delegate = make_lsp_adapter_delegate(&self.project, cx).log_err();
+        let lsp_adapter_delegate = make_lsp_adapter_delegate(&self.project, cx)
+            .log_err()
+            .flatten();
 
         cx.spawn(|this, mut cx| async move {
             let context = context.await?;
@@ -1555,7 +1560,7 @@ impl ContextEditor {
             editor.set_show_runnables(false, cx);
             editor.set_show_wrap_guides(false, cx);
             editor.set_show_indent_guides(false, cx);
-            editor.set_completion_provider(Box::new(completion_provider));
+            editor.set_completion_provider(Some(Box::new(completion_provider)));
             editor.set_collaboration_hub(Box::new(project.clone()));
             editor
         });
@@ -5507,22 +5512,21 @@ fn render_docs_slash_command_trailer(
 fn make_lsp_adapter_delegate(
     project: &Model<Project>,
     cx: &mut AppContext,
-) -> Result<Arc<dyn LspAdapterDelegate>> {
+) -> Result<Option<Arc<dyn LspAdapterDelegate>>> {
     project.update(cx, |project, cx| {
         // TODO: Find the right worktree.
-        let worktree = project
-            .worktrees(cx)
-            .next()
-            .ok_or_else(|| anyhow!("no worktrees when constructing LocalLspAdapterDelegate"))?;
+        let Some(worktree) = project.worktrees(cx).next() else {
+            return Ok(None::<Arc<dyn LspAdapterDelegate>>);
+        };
         let http_client = project.client().http_client().clone();
         project.lsp_store().update(cx, |lsp_store, cx| {
-            Ok(LocalLspAdapterDelegate::new(
+            Ok(Some(LocalLspAdapterDelegate::new(
                 lsp_store,
                 &worktree,
                 http_client,
                 project.fs().clone(),
                 cx,
-            ) as Arc<dyn LspAdapterDelegate>)
+            ) as Arc<dyn LspAdapterDelegate>))
         })
     })
 }
